@@ -1,0 +1,358 @@
+#!/bin/bash
+# Smart Connect - single entry point for the whole project.
+#
+# Usage: ./run <command>
+#   setup    Initial setup: install SSH server and connect Tailscale
+#   update   Update SSH & Tailscale and keep the services running
+#   status   Show SSH + Tailscale status and your Tailscale IP
+#   ip       Print your Tailscale IPv4 and the phone SSH command
+#   help     Show this help
+
+set -euo pipefail
+
+SELF="$(basename "${BASH_SOURCE[0]}")"
+
+# --- Privilege handling -------------------------------------------------
+if [[ "${EUID}" -eq 0 ]]; then
+  SUDO=""
+elif command -v sudo &>/dev/null; then
+  SUDO="sudo"
+else
+  echo "Root privileges are required. Re-run as root or install sudo." >&2
+  exit 1
+fi
+
+log()  { printf '%s\n' "$*"; }
+warn() { printf '%s\n' "$*" >&2; }
+
+usage() {
+  cat <<EOF
+Smart Connect - reach this laptop's terminal from your phone (Tailscale + SSH)
+
+Usage: ./${SELF} <command>
+
+Commands:
+  setup    Initial setup: install SSH server and connect Tailscale
+  start    Start SSH and bring Tailscale up (aliases: up)
+  stop     Stop SSH and Tailscale completely (aliases: down)
+  update   Update SSH & Tailscale and keep the services running
+  status   Show SSH + Tailscale status and your Tailscale IP
+  ip       Print your Tailscale IPv4 and the phone SSH command
+  help     Show this help
+
+First time? Run: ./${SELF} setup
+EOF
+}
+
+# --- Helpers ------------------------------------------------------------
+detect_pkg() {
+  if command -v apt &>/dev/null; then echo apt
+  elif command -v dnf &>/dev/null; then echo dnf
+  elif command -v pacman &>/dev/null; then echo pacman
+  else echo none; fi
+}
+
+ssh_installed() {
+  command -v sshd &>/dev/null || [[ -x /usr/sbin/sshd ]]
+}
+
+ssh_unit() {
+  local units
+  units="$(systemctl list-unit-files 2>/dev/null || true)"
+  if grep -q '^ssh\.service' <<<"${units}"; then
+    echo ssh
+  elif grep -q '^sshd\.service' <<<"${units}"; then
+    echo sshd
+  else
+    echo ""
+  fi
+}
+
+
+install_ssh() {
+  if ssh_installed; then
+    log "OpenSSH server already installed."
+    return 0
+  fi
+  log "Installing OpenSSH server..."
+  case "$(detect_pkg)" in
+    apt)    ${SUDO} apt update; ${SUDO} apt install -y openssh-server ;;
+    dnf)    ${SUDO} dnf install -y openssh-server ;;
+    pacman) ${SUDO} pacman -Sy --noconfirm openssh ;;
+    *)      warn "Unsupported package manager. Install openssh-server manually."; return 1 ;;
+  esac
+}
+
+ssh_start() {
+  if ! command -v systemctl &>/dev/null; then
+    warn "systemctl not found. Start the SSH service manually."
+    return 1
+  fi
+  ${SUDO} systemctl daemon-reload 2>/dev/null || true
+
+  local unit
+  unit="$(ssh_unit)"
+  if [[ -n "${unit}" ]]; then
+    ${SUDO} systemctl start "${unit}"
+  elif ${SUDO} systemctl start ssh 2>/dev/null || ${SUDO} systemctl start sshd 2>/dev/null; then
+    :
+  else
+    warn "Could not start the SSH service. Start it manually."
+    return 1
+  fi
+}
+
+ssh_stop() {
+  if ! command -v systemctl &>/dev/null; then
+    warn "systemctl not found; stop sshd manually."
+    return 1
+  fi
+
+  local unit
+  unit="$(ssh_unit)"
+  if [[ -n "${unit}" ]]; then
+    ${SUDO} systemctl stop "${unit}" 2>/dev/null || true
+  fi
+  ${SUDO} systemctl stop ssh.socket sshd.socket sshd-unix-local.socket 2>/dev/null || true
+  ${SUDO} systemctl disable ssh.socket sshd.socket sshd-unix-local.socket 2>/dev/null || true
+
+  if pgrep -x sshd &>/dev/null; then
+    warn "sshd is still running. Stop it manually."
+    return 1
+  fi
+}
+
+install_tailscale() {
+  if command -v tailscale &>/dev/null; then
+    log "Tailscale already installed."
+    return 0
+  fi
+  if ! command -v curl &>/dev/null; then
+    warn "curl is required to install Tailscale."
+    return 1
+  fi
+  log "Installing Tailscale..."
+  curl -fsSL https://tailscale.com/install.sh | sh
+}
+
+update_tailscale() {
+  if ! command -v tailscale &>/dev/null; then
+    install_tailscale
+    return 0
+  fi
+  log "Updating Tailscale..."
+  case "$(detect_pkg)" in
+    apt)    ${SUDO} apt install -y --only-upgrade tailscale || true ;;
+    dnf)    ${SUDO} dnf upgrade -y tailscale || true ;;
+    pacman) ${SUDO} pacman -S --noconfirm tailscale || true ;;
+    *)      warn "Unsupported package manager; update Tailscale manually." ;;
+  esac
+}
+
+tailscale_up() {
+  if tailscale status &>/dev/null; then
+    log "Tailscale is already connected."
+    return 0
+  fi
+
+  if command -v systemctl &>/dev/null && ! pgrep -x tailscaled &>/dev/null; then
+    log "Starting tailscaled..."
+    ${SUDO} systemctl start tailscaled 2>/dev/null || true
+  fi
+
+  log "Bringing Tailscale up (a login URL may appear)..."
+  local out rc
+  set +e
+  out="$(${SUDO} tailscale up 2>&1)"
+  rc=$?
+  set -e
+  printf '%s\n' "${out}"
+
+  if [[ ${rc} -ne 0 ]] && grep -q "non-default flags" <<<"${out}"; then
+    local retry
+    retry="$(grep -oE 'tailscale up .*' <<<"${out}" | head -n1)"
+    if [[ -n "${retry}" ]]; then
+      log ""
+      log "Existing settings detected; re-running: sudo ${retry}"
+      ${SUDO} ${retry}
+      return $?
+    fi
+    warn "Re-run manually with the flags shown above."
+    return 1
+  elif [[ ${rc} -ne 0 ]]; then
+    warn "Tailscale did not come up. See the message above."
+    return 1
+  fi
+}
+
+print_ip() {
+  if ! command -v tailscale &>/dev/null; then
+    warn "Tailscale is not installed. Run: ./${SELF} setup"
+    return 1
+  fi
+  local ip
+  ip="$(tailscale ip -4 2>/dev/null | head -n1 || true)"
+  if [[ -n "${ip}" ]]; then
+    log "Tailscale IPv4: ${ip}"
+    log "Connect from your phone: ssh $(whoami)@${ip}"
+  else
+    warn "No Tailscale IP yet. Run: ./${SELF} setup"
+    return 1
+  fi
+}
+
+# --- Commands -----------------------------------------------------------
+cmd_setup() {
+  log "=== Smart Connect - Setup ==="
+  log ""
+
+  log "--- SSH server ---"
+  install_ssh
+  ssh_start && log "SSH server is running."
+
+  log ""
+  log "--- Tailscale ---"
+  install_tailscale
+  tailscale_up
+
+  log ""
+  log "=== Done ==="
+  print_ip || true
+}
+
+cmd_update() {
+  log "=== Smart Connect - Update ==="
+  log ""
+
+  log "--- Refreshing package lists ---"
+  case "$(detect_pkg)" in
+    apt)    ${SUDO} apt update ;;
+    dnf)    : ;;
+    pacman) ${SUDO} pacman -Sy ;;
+    *)      warn "Unsupported package manager; skipping package updates." ;;
+  esac
+
+  log ""
+  log "--- SSH server ---"
+  if ssh_installed; then
+    case "$(detect_pkg)" in
+      apt)    ${SUDO} apt install -y --only-upgrade openssh-server || true ;;
+      dnf)    ${SUDO} dnf upgrade -y openssh-server || true ;;
+      pacman) ${SUDO} pacman -S --noconfirm openssh || true ;;
+    esac
+    log "OpenSSH server is up to date."
+  else
+    install_ssh
+  fi
+  ssh_start && log "SSH server is running."
+
+  log ""
+  log "--- Tailscale ---"
+  update_tailscale
+  tailscale_up
+
+  log ""
+  log "=== Done ==="
+  print_ip || true
+}
+
+cmd_status() {
+  log "=== Smart Connect - Status ==="
+  log ""
+
+  log "--- SSH server ---"
+  if ! ssh_installed; then
+    log "OpenSSH server is NOT installed. Run: ./${SELF} setup"
+  elif command -v systemctl &>/dev/null; then
+    local unit
+    unit="$(ssh_unit)"
+    if [[ -n "${unit}" ]]; then
+      systemctl status "${unit}" --no-pager || true
+    else
+      log "Could not detect the SSH unit. Check with: pgrep -x sshd"
+    fi
+  else
+    log "systemctl not found. Check manually with: pgrep -x sshd"
+  fi
+
+  log ""
+  log "--- Tailscale ---"
+  if command -v tailscale &>/dev/null; then
+    tailscale status || true
+  else
+    log "Tailscale is NOT installed. Run: ./${SELF} setup"
+  fi
+
+  log ""
+  print_ip || true
+}
+
+cmd_start() {
+  log "=== Smart Connect - Start ==="
+  log ""
+
+  log "--- SSH server ---"
+  if ssh_installed; then
+    ssh_start && log "SSH server is running."
+  else
+    warn "OpenSSH server is not installed. Run: ./${SELF} setup"
+  fi
+
+  log ""
+  log "--- Tailscale ---"
+  if command -v tailscale &>/dev/null; then
+    tailscale_up
+  else
+    warn "Tailscale is not installed. Run: ./${SELF} setup"
+  fi
+
+  log ""
+  print_ip || true
+}
+
+cmd_stop() {
+  log "=== Smart Connect - Stop ==="
+  log ""
+
+  log "--- SSH server ---"
+  if ssh_installed; then
+    ssh_stop && log "SSH server stopped."
+  else
+    log "OpenSSH server is not installed."
+  fi
+
+  log ""
+  log "--- Tailscale ---"
+  if command -v tailscale &>/dev/null; then
+    if tailscale status &>/dev/null; then
+      ${SUDO} tailscale down && log "Tailscale disconnected."
+    else
+      log "Tailscale is already disconnected."
+    fi
+    if command -v systemctl &>/dev/null && pgrep -x tailscaled &>/dev/null; then
+      ${SUDO} systemctl stop tailscaled && log "tailscaled stopped."
+    fi
+  else
+    log "Tailscale is not installed."
+  fi
+
+  log ""
+  log "Stopped. Bring it back with: ./${SELF} start"
+}
+
+# --- Dispatch -----------------------------------------------------------
+case "${1:-help}" in
+  setup)          cmd_setup ;;
+  start|up)       cmd_start ;;
+  stop|down)      cmd_stop ;;
+  update)         cmd_update ;;
+  status)         cmd_status ;;
+  ip)             print_ip ;;
+  help|-h|--help) usage ;;
+  *)
+    warn "Unknown command: ${1}"
+    log ""
+    usage
+    exit 1
+    ;;
+esac
