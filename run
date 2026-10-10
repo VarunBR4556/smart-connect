@@ -1,29 +1,59 @@
 #!/bin/bash
-# Smart Connect - single entry point for the whole project.
+# Smart Connect - single entry point for the whole project (Linux/WSL).
 #
-# Usage: ./run <command>
+# The OS is auto-detected: this script handles Linux, and points you to the
+# Windows entry point (run.ps1) when run on Windows.
+#
+# Usage: ./run <command>   (Linux; PowerShell users: ./run.ps1 works too)
 #   setup    Initial setup: install SSH server and connect Tailscale
 #   update   Update SSH & Tailscale and keep the services running
 #   status   Show SSH + Tailscale status and your Tailscale IP
 #   ip       Print your Tailscale IPv4 and the phone SSH command
 #   help     Show this help
-
 set -euo pipefail
 
 SELF="$(basename "${BASH_SOURCE[0]}")"
 
-# --- Privilege handling -------------------------------------------------
-if [[ "${EUID}" -eq 0 ]]; then
+log()  { printf '%s\n' "$*"; }
+warn() { printf '%s\n' "$*" >&2; }
+
+# The real login user, even when this script (or the web console) runs under sudo.
+current_user() {
+  printf '%s' "${SUDO_USER:-$(whoami)}"
+}
+
+# --- OS detection (automatic) -------------------------------------------
+detect_os() {
+  local uname_s
+  uname_s="$(uname -s 2>/dev/null || echo unknown)"
+  case "${uname_s}" in
+    Linux)
+      if [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then
+        echo wsl
+      else
+        echo linux
+      fi
+      ;;
+    Darwin)                            echo macos ;;
+    MINGW*|MSYS*|CYGWIN*)              echo windows ;;
+    *)                                 echo unknown ;;
+  esac
+}
+
+OS="$(detect_os)"
+
+# --- Privilege handling (Linux/WSL only) --------------------------------
+# On any other OS, require_this_os() reports the right entry point instead.
+if [[ "${OS}" != "linux" && "${OS}" != "wsl" ]]; then
+  SUDO=""
+elif [[ "${EUID}" -eq 0 ]]; then
   SUDO=""
 elif command -v sudo &>/dev/null; then
   SUDO="sudo"
 else
-  echo "Root privileges are required. Re-run as root or install sudo." >&2
+  warn "Root privileges are required. Re-run as root or install sudo."
   exit 1
 fi
-
-log()  { printf '%s\n' "$*"; }
-warn() { printf '%s\n' "$*" >&2; }
 
 usage() {
   cat <<EOF
@@ -32,19 +62,46 @@ Smart Connect - reach this laptop's terminal from your phone (Tailscale + SSH)
 Usage: ./${SELF} <command>
 
 Commands:
+  gui      Open the web console (no typing - works in your browser)
   setup    Initial setup: install SSH server and connect Tailscale
   start    Start SSH and bring Tailscale up (aliases: up)
   stop     Stop SSH and Tailscale completely (aliases: down)
   update   Update SSH & Tailscale and keep the services running
   status   Show SSH + Tailscale status and your Tailscale IP
   ip       Print your Tailscale IPv4 and the phone SSH command
+  check    Verify this system meets all version requirements
+  sos      Self-destruct: remove SSH, Tailscale and every project file
   help     Show this help
+
+No command? The web console opens automatically when python3 is available.
 
 First time? Run: ./${SELF} setup
 EOF
 }
 
 # --- Helpers ------------------------------------------------------------
+require_this_os() {
+  case "${OS}" in
+    linux|wsl) return 0 ;;
+    windows)
+      warn "Windows detected - this Bash entry point does not run on Windows."
+      warn "Use the Windows entry point instead (same commands):"
+      warn ""
+      warn "  ./run.ps1 setup      (PowerShell, or .\\run.ps1 setup)"
+      warn ""
+      exit 1
+      ;;    macos)
+      warn "macOS detected - not supported (no systemd)."
+      warn "Smart Connect works on Ubuntu/Debian/Fedora/Arch and Windows 10/11."
+      exit 1
+      ;;
+    *)
+      warn "Unsupported operating system: $(uname -s 2>/dev/null || echo unknown)"
+      exit 1
+      ;;
+  esac
+}
+
 detect_pkg() {
   if command -v apt &>/dev/null; then echo apt
   elif command -v dnf &>/dev/null; then echo dnf
@@ -194,7 +251,7 @@ print_ip() {
   ip="$(tailscale ip -4 2>/dev/null | head -n1 || true)"
   if [[ -n "${ip}" ]]; then
     log "Tailscale IPv4: ${ip}"
-    log "Connect from your phone: ssh $(whoami)@${ip}"
+    log "Connect from your phone: ssh $(current_user)@${ip}"
   else
     warn "No Tailscale IP yet. Run: ./${SELF} setup"
     return 1
@@ -340,15 +397,701 @@ cmd_stop() {
   log "Stopped. Bring it back with: ./${SELF} start"
 }
 
+# --- Machine-readable status (used by the web console) ------------------
+cmd_status_json() {
+  local os_name ssh_ok="false" ssh_service="" ssh_active="false"
+  local ts_ok="false" ts_connected="false" ip="" user
+
+  os_name="$(. /etc/os-release 2>/dev/null; printf '%s' "${PRETTY_NAME:-unknown}" | tr -d '"\\')"
+
+  if ssh_installed; then
+    ssh_ok="true"
+    ssh_service="$(ssh_unit)"
+    if [[ -n "${ssh_service}" ]] && systemctl is-active --quiet "${ssh_service}" 2>/dev/null; then
+      ssh_active="true"
+    fi
+  fi
+
+  if command -v tailscale &>/dev/null; then
+    ts_ok="true"
+    if tailscale status &>/dev/null; then
+      ts_connected="true"
+      ip="$(tailscale ip -4 2>/dev/null | head -n1 || true)"
+    fi
+  fi
+
+  user="$(current_user)"
+  printf '{"platform":"linux","os":"%s","user":"%s","ssh_installed":%s,"ssh_service":"%s","ssh_active":%s,"tailscale_installed":%s,"tailscale_connected":%s,"ip":"%s"}\n' \
+    "${os_name}" "${user}" "${ssh_ok}" "${ssh_service}" "${ssh_active}" "${ts_ok}" "${ts_connected}" "${ip}"
+}
+
+# --- Version compatibility report ---------------------------------------
+# check_row <label> <value> <verdict> [note]
+check_row() {
+  printf '  %-14s %-38s %s%s\n' "$1" "$2" "$3" "${4:+  ($4)}"
+}
+
+# ver_ge <have> <need> - true when have >= need (version sort)
+ver_ge() {
+  printf '%s\n%s\n' "$2" "$1" | sort -V -C 2>/dev/null
+}
+
+cmd_check() {
+  local fail=0
+
+  log "=== Smart Connect - Compatibility check ==="
+  log ""
+
+  # --- Platform ---
+  log "--- Platform ---"
+  local os_name kernel bash_ver init_ver pkg
+  os_name="$(. /etc/os-release 2>/dev/null; printf '%s' "${PRETTY_NAME:-unknown}")"
+  kernel="$(uname -r)"
+  bash_ver="${BASH_VERSION%%(*}"
+  init_ver="$(systemctl --version 2>/dev/null | head -n1 | awk '{print $2}')"
+  pkg="$(detect_pkg)"
+
+  check_row "OS:" "${os_name}" "OK"
+  check_row "Kernel:" "${kernel}" "OK"
+  if [[ -n "${init_ver}" ]] && ver_ge "${init_ver}" "230"; then
+    check_row "Init system:" "systemd ${init_ver}" "OK" "needs 230+"
+  elif [[ -n "${init_ver}" ]]; then
+    check_row "Init system:" "systemd ${init_ver}" "FAIL" "needs 230+"; fail=1
+  else
+    check_row "Init system:" "not found" "FAIL" "systemd required"; fail=1
+  fi
+  if ver_ge "${bash_ver}" "4.0"; then
+    check_row "Shell:" "Bash ${bash_ver}" "OK" "needs 4.0+"
+  else
+    check_row "Shell:" "Bash ${bash_ver}" "FAIL" "needs 4.0+"; fail=1
+  fi
+  if [[ "${pkg}" != "none" ]]; then
+    check_row "Package mgr:" "${pkg}" "OK"
+  else
+    check_row "Package mgr:" "none detected" "WARN" "setup installs manually"
+  fi
+  log ""
+
+  # --- SSH ---
+  log "--- SSH ---"
+  local sshd_ver unit
+  sshd_ver="$({ sshd -V 2>&1 || /usr/sbin/sshd -V 2>&1; } | head -n1 | awk '{print $1}')"
+  if [[ -n "${sshd_ver}" ]]; then
+    check_row "sshd binary:" "${sshd_ver}" "OK" "needs 7.0+"
+  else
+    check_row "sshd binary:" "not installed" "WARN" "run: ./${SELF} setup"
+  fi
+  unit="$(ssh_unit)"
+  if [[ -n "${unit}" ]]; then
+    local active
+    active="$(systemctl is-active "${unit}" 2>/dev/null || true)"
+    check_row "SSH service:" "${unit}.service (${active})" "OK" "detected"
+  else
+    check_row "SSH service:" "not detected" "WARN" "run: ./${SELF} setup"
+  fi
+  log ""
+
+  # --- Tailscale ---
+  log "--- Tailscale ---"
+  local ts_ver
+  ts_ver="$(tailscale version 2>/dev/null | head -n1 || true)"
+  if [[ -n "${ts_ver}" ]]; then
+    if ver_ge "${ts_ver}" "1.30"; then
+      check_row "Tailscale:" "${ts_ver}" "OK" "needs 1.30+"
+    else
+      check_row "Tailscale:" "${ts_ver}" "WARN" "1.30+ recommended; run ./${SELF} update"
+    fi
+  else
+    check_row "Tailscale:" "not installed" "WARN" "run: ./${SELF} setup"
+  fi
+  if pgrep -x tailscaled &>/dev/null; then
+    check_row "tailscaled:" "running" "OK"
+  else
+    check_row "tailscaled:" "not running" "INFO" "run: ./${SELF} start"
+  fi
+  log ""
+
+  # --- Web console ---
+  log "--- Web console (./${SELF} gui) ---"
+  local py_ver
+  py_ver="$(python3 --version 2>/dev/null | awk '{print $2}' || true)"
+  if [[ -n "${py_ver}" ]] && ver_ge "${py_ver}" "3.6"; then
+    check_row "python3:" "${py_ver}" "OK" "needs 3.6+"
+  elif [[ -n "${py_ver}" ]]; then
+    check_row "python3:" "${py_ver}" "FAIL" "needs 3.6+"; fail=1
+  else
+    check_row "python3:" "not installed" "WARN" "GUI unavailable (sudo apt install python3)"
+  fi
+  if command -v xdg-open &>/dev/null; then
+    check_row "browser open:" "xdg-open" "OK"
+  else
+    check_row "browser open:" "xdg-open missing" "INFO" "open the printed URL manually"
+  fi
+  log ""
+
+  if [[ "${fail}" -eq 0 ]]; then
+    log "Result: this system meets every requirement."
+  else
+    warn "Result: some requirements are not met (see FAIL rows above)."
+    exit 1
+  fi
+}
+
+# --- Web console --------------------------------------------------------
+gui_script_dir() {
+  cd "$(dirname "${BASH_SOURCE[0]}")" && pwd
+}
+
+cmd_gui() {
+  if ! command -v python3 &>/dev/null; then
+    warn "The web console needs python3 (Ubuntu/Debian: sudo apt install python3)."
+    warn "You can still use: ./${SELF} start | stop | status | ip"
+    exit 1
+  fi
+
+  local dir
+  dir="$(gui_script_dir)"
+  if [[ ! -f "${dir}/gui.html" ]]; then
+    warn "gui.html not found next to ./${SELF}. Re-clone the repository."
+    exit 1
+  fi
+
+  log "Starting the Smart Connect web console..."
+  log "Close this terminal or press Ctrl+C to stop it."
+  log ""
+
+  # The Python console backend is embedded here (it used to be server.py).
+  # The project folder is passed as the first argument; the script arrives on
+  # stdin, so nothing extra is written to disk.
+  read -r -d '' SC_PY <<'SMARTCONNECT_PY' || true
+#!/usr/bin/env python3
+"""Smart Connect - local web console backend (Linux).
+
+Serves gui.html and a small authenticated API that runs ./run <command>
+plus interactive shell commands, streaming their output live.
+Listens on 127.0.0.1 only; every API call must carry the session token.
+Python 3.6+, standard library only.
+"""
+import fcntl
+import itertools
+import json
+import os
+import pty
+import secrets
+import select
+import signal
+import struct
+import subprocess
+import sys
+import tempfile
+import termios
+import threading
+import time
+import webbrowser
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
+from urllib.parse import parse_qs, urlparse
+
+if len(sys.argv) > 1:
+    ROOT = os.path.abspath(sys.argv[1])
+else:
+    ROOT = os.path.dirname(os.path.abspath(__file__))
+RUN = os.path.join(ROOT, 'run')
+HTML = os.path.join(ROOT, 'gui.html')
+
+ALLOWED = ('setup', 'start', 'stop', 'update', 'status', 'ip', 'check')
+COMMAND_TIMEOUT = 600   # seconds
+MAX_SHELL_LEN = 8192
+TOKEN = secrets.token_urlsafe(24)
+
+# --- background jobs (live streaming output) ----------------------------
+JOBS = {}
+JOBS_LOCK = threading.Lock()
+JOB_SEQ = itertools.count(1)
+
+
+def shell_argv(command):
+    if os.path.exists('/bin/bash'):
+        return ['/bin/bash', '-lc', command]
+    if os.path.exists('/bin/sh'):
+        return ['/bin/sh', '-c', command]
+    return ['sh', '-c', command]
+
+
+def login_user():
+    return os.environ.get('SUDO_USER') or os.environ.get('USER') or ''
+
+
+def work_dir():
+    user = login_user()
+    if user:
+        try:
+            import pwd
+            return pwd.getpwnam(user).pw_dir
+        except (KeyError, ImportError):
+            pass
+    return ROOT
+
+
+def _append(job_id, text):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job is not None:
+            job['output'] += text
+
+
+def _finish(job_id, code):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job is not None:
+            job['running'] = False
+            job['code'] = code
+
+
+def _worker(job_id, argv, cwd):
+    try:
+        proc = subprocess.Popen(
+            argv, cwd=cwd,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            universal_newlines=True, bufsize=1,
+        )
+    except OSError as exc:
+        _append(job_id, 'could not start: %s\n' % exc)
+        _finish(job_id, 127)
+        return
+
+    killed = {'flag': False}
+
+    def _on_timeout():
+        killed['flag'] = True
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+    timer = threading.Timer(COMMAND_TIMEOUT, _on_timeout)
+    timer.start()
+    try:
+        if proc.stdout is not None:
+            for line in proc.stdout:
+                _append(job_id, line)
+    finally:
+        timer.cancel()
+        proc.wait()
+
+    code = proc.returncode
+    if killed['flag']:
+        _append(job_id, '\n[stopped after %d seconds]\n' % COMMAND_TIMEOUT)
+        code = 124
+    _finish(job_id, code if code is not None else 124)
+
+
+def _worker_pty(job_id, argv, cwd):
+    """Run argv attached to a pseudo-terminal so programs emit ANSI colour."""
+    master = slave = None
+    try:
+        master, slave = pty.openpty()
+        try:
+            winsize = struct.pack('HHHH', 40, 120, 0, 0)
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, winsize)
+        except OSError:
+            pass
+        env = os.environ.copy()
+        env['TERM'] = 'xterm-256color'
+        env['CLICOLOR_FORCE'] = '1'
+        env['FORCE_COLOR'] = '1'
+        env['PWD'] = cwd
+        proc = subprocess.Popen(
+            argv, cwd=cwd, stdin=slave, stdout=slave, stderr=slave,
+            env=env, preexec_fn=os.setsid, close_fds=True,
+        )
+    except OSError as exc:
+        _append(job_id, 'could not start: %s\n' % exc)
+        _finish(job_id, 127)
+        for fd in (master, slave):
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        return
+
+    os.close(slave)
+
+    killed = {'flag': False}
+
+    def _on_timeout():
+        killed['flag'] = True
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except OSError:
+            pass
+
+    timer = threading.Timer(COMMAND_TIMEOUT, _on_timeout)
+    timer.start()
+    try:
+        while True:
+            try:
+                ready, _, _ = select.select([master], [], [], 0.25)
+            except (InterruptedError, OSError):
+                ready = []
+            if ready:
+                try:
+                    data = os.read(master, 4096)
+                except OSError:
+                    break
+                if not data:
+                    break
+                _append(job_id, data.decode('utf-8', 'replace').replace('\r\n', '\n'))
+            elif proc.poll() is not None:
+                break
+    finally:
+        timer.cancel()
+        proc.wait()
+        try:
+            os.close(master)
+        except OSError:
+            pass
+
+    code = proc.returncode
+    if killed['flag']:
+        _append(job_id, '\n[stopped after %d seconds]\n' % COMMAND_TIMEOUT)
+        code = 124
+    _finish(job_id, code if code is not None else 124)
+
+
+def start_job(argv, cwd, use_pty=False):
+    job_id = str(next(JOB_SEQ))
+    with JOBS_LOCK:
+        JOBS[job_id] = {'id': job_id, 'running': True, 'code': None,
+                        'output': '', 'started': time.time()}
+    worker = _worker_pty if use_pty else _worker
+    threading.Thread(target=worker, args=(job_id, argv, cwd), daemon=True).start()
+    return job_id
+
+
+def job_snapshot(job_id):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job is None:
+            return None
+        return {'id': job['id'], 'running': job['running'],
+                'code': job['code'], 'output': job['output']}
+
+
+def start_sos():
+    """Launch ./run sos detached so the wipe outlives this process.
+
+    Returns an error string on failure, or None on success.
+    """
+    log_path = os.path.join(tempfile.gettempdir(), 'smart-connect-sos.log')
+    try:
+        sink = open(log_path, 'ab')
+    except OSError:
+        sink = subprocess.DEVNULL
+    env = os.environ.copy()
+    env['SC_SERVER_PID'] = str(os.getpid())
+    try:
+        subprocess.Popen(
+            [RUN, 'sos'], cwd='/', env=env, stdin=subprocess.DEVNULL,
+            stdout=sink, stderr=subprocess.STDOUT,
+            start_new_session=True, close_fds=True,
+        )
+    except OSError as exc:
+        return 'could not start self-destruct: %s' % exc
+    return None
+
+
+class ThreadingServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = 'SmartConnect'
+    protocol_version = 'HTTP/1.1'
+
+    def log_message(self, fmt, *args):
+        return  # quiet: the console polls every few seconds
+
+    # --- security -------------------------------------------------------
+    @property
+    def port(self):
+        return self.server.server_address[1]
+
+    def host_ok(self):
+        host = (self.headers.get('Host') or '').strip()
+        return host in ('127.0.0.1:%d' % self.port, 'localhost:%d' % self.port)
+
+    def origin_ok(self):
+        origin = self.headers.get('Origin')
+        if not origin:
+            return True  # same-origin GETs may omit Origin; token is still required
+        parsed = urlparse(origin)
+        return parsed.hostname in ('127.0.0.1', 'localhost') and parsed.port == self.port
+
+    def token_ok(self, query):
+        supplied = self.headers.get('X-Smart-Token') or query.get('t', [''])[0] or ''
+        return secrets.compare_digest(str(supplied), TOKEN)
+
+    def authorized(self, query):
+        return self.host_ok() and self.origin_ok() and self.token_ok(query)
+
+    # --- responses ------------------------------------------------------
+    def send_body(self, code, body, ctype):
+        if not isinstance(body, bytes):
+            body = body.encode('utf-8')
+        self.send_response(code)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_json(self, code, obj):
+        self.send_body(code, json.dumps(obj), 'application/json; charset=utf-8')
+
+    def read_json(self):
+        try:
+            length = int(self.headers.get('Content-Length') or 0)
+            raw = self.rfile.read(length) if length else b'{}'
+            return json.loads(raw.decode('utf-8'))
+        except (ValueError, UnicodeDecodeError):
+            return None
+
+    # --- routes ---------------------------------------------------------
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+
+        if parsed.path == '/':
+            try:
+                with open(HTML, 'r', encoding='utf-8') as handle:
+                    self.send_body(200, handle.read(), 'text/html; charset=utf-8')
+            except OSError:
+                self.send_body(500, 'gui.html is missing from the Smart Connect folder.',
+                               'text/plain; charset=utf-8')
+            return
+
+        if parsed.path == '/favicon.ico':
+            self.send_body(204, b'', 'image/x-icon')
+            return
+
+        if parsed.path == '/api/status':
+            if not self.authorized(query):
+                self.send_json(401, {'error': 'unauthorized'})
+                return
+            self.handle_status()
+            return
+
+        if parsed.path == '/api/job':
+            if not self.authorized(query):
+                self.send_json(401, {'error': 'unauthorized'})
+                return
+            job = job_snapshot(query.get('id', [''])[0])
+            if job is None:
+                self.send_json(404, {'error': 'unknown job'})
+            else:
+                self.send_json(200, job)
+            return
+
+        self.send_json(404, {'error': 'not found'})
+
+    def handle_status(self):
+        try:
+            proc = subprocess.run(
+                [RUN, 'status', '--json'], cwd=ROOT, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, universal_newlines=True,
+                timeout=COMMAND_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            self.send_json(500, {'error': 'status timed out'})
+            return
+        except OSError as exc:
+            self.send_json(500, {'error': 'could not run ./run: %s' % exc})
+            return
+        if proc.returncode == 0:
+            try:
+                self.send_json(200, json.loads(proc.stdout))
+                return
+            except ValueError:
+                self.send_json(500, {'error': 'could not read status', 'raw': proc.stdout})
+                return
+        self.send_json(500, {'error': 'status failed', 'raw': proc.stdout})
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+
+        if parsed.path == '/api/sos':
+            if not self.authorized(query):
+                self.send_json(401, {'error': 'unauthorized'})
+                return
+            payload = self.read_json()
+            if not isinstance(payload, dict) or str(payload.get('confirm', '')) != 'SOS':
+                self.send_json(400, {'error': 'confirmation required'})
+                return
+            error = start_sos()
+            if error:
+                self.send_json(500, {'error': error})
+            else:
+                self.send_json(200, {'ok': True})
+            return
+
+        if parsed.path != '/api/run':
+            self.send_json(404, {'error': 'not found'})
+            return
+        if not self.authorized(query):
+            self.send_json(401, {'error': 'unauthorized'})
+            return
+
+        payload = self.read_json()
+        if not isinstance(payload, dict):
+            self.send_json(400, {'error': 'invalid JSON body'})
+            return
+
+        if 'cmd' in payload:
+            cmd = str(payload.get('cmd', ''))
+            if cmd not in ALLOWED:
+                self.send_json(400, {'error': 'unknown command'})
+                return
+            job_id = start_job([RUN, cmd], ROOT)
+        elif 'shell' in payload:
+            command = str(payload.get('shell', '')).strip()
+            if not command:
+                self.send_json(400, {'error': 'empty command'})
+                return
+            if len(command) > MAX_SHELL_LEN:
+                self.send_json(400, {'error': 'command too long'})
+                return
+            job_id = start_job(shell_argv(command), work_dir(), use_pty=True)
+        else:
+            self.send_json(400, {'error': 'missing cmd or shell'})
+            return
+
+        self.send_json(200, {'job': job_id})
+
+
+def main():
+    server = ThreadingServer(('127.0.0.1', 0), Handler)
+    port = server.server_address[1]
+    url = 'http://127.0.0.1:%d/?t=%s' % (port, TOKEN)
+
+    print('Smart Connect web console', flush=True)
+    print('', flush=True)
+    print('  %s' % url, flush=True)
+    print('', flush=True)
+    print('Leave this terminal open; press Ctrl+C to stop.', flush=True)
+
+    timer = threading.Timer(0.4, lambda: webbrowser.open(url))
+    timer.daemon = True
+    timer.start()
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print('\nConsole stopped.')
+    finally:
+        server.server_close()
+
+
+if __name__ == '__main__':
+    main()
+
+SMARTCONNECT_PY
+
+  if [[ -n "${SUDO}" ]]; then
+    exec ${SUDO} python3 - "${dir}" <<<"${SC_PY}"
+  else
+    exec python3 - "${dir}" <<<"${SC_PY}"
+  fi
+}
+# --- Self-destruct (SOS) ------------------------------------------------
+# Removes everything this project created: the SSH server package, Tailscale
+# (logged out, disconnected and uninstalled) and the project folder itself.
+# Triggered by the "SOS" button in the web console, or manually: ./run sos
+cmd_sos() {
+  local root server_pid
+  root="$(gui_script_dir)"
+
+  log "SOS - removing Smart Connect and everything it installed."
+  log ""
+
+  if [[ -n "${SC_SERVER_PID:-}" ]]; then
+    server_pid="${SC_SERVER_PID}"
+  else
+    server_pid=""
+  fi
+
+  log "[1/4] Stopping and removing the SSH server..."
+  ssh_stop 2>/dev/null || true
+  case "$(detect_pkg)" in
+    apt)    ${SUDO} apt-get -y remove --purge openssh-server >/dev/null 2>&1 || true ;;
+    dnf)    ${SUDO} dnf -y remove openssh-server >/dev/null 2>&1 || true ;;
+    pacman) ${SUDO} pacman -Rns --noconfirm openssh >/dev/null 2>&1 || true ;;
+    *)      warn "Unknown package manager; remove openssh-server manually." ;;
+  esac
+
+  log "[2/4] Disconnecting and removing Tailscale..."
+  if command -v tailscale &>/dev/null; then
+    ${SUDO} tailscale down >/dev/null 2>&1 || true
+    ${SUDO} tailscale logout >/dev/null 2>&1 || true
+  fi
+  if command -v systemctl &>/dev/null; then
+    ${SUDO} systemctl stop tailscaled >/dev/null 2>&1 || true
+    ${SUDO} systemctl disable tailscaled >/dev/null 2>&1 || true
+  fi
+  case "$(detect_pkg)" in
+    apt)    ${SUDO} apt-get -y remove --purge tailscale >/dev/null 2>&1 || true ;;
+    dnf)    ${SUDO} dnf -y remove tailscale >/dev/null 2>&1 || true ;;
+    pacman) ${SUDO} pacman -Rns --noconfirm tailscale >/dev/null 2>&1 || true ;;
+    *)      : ;;
+  esac
+  ${SUDO} apt-get -y autoremove >/dev/null 2>&1 || true
+
+  log "[3/4] Stopping the web console..."
+  if [[ -n "${server_pid}" ]]; then
+    kill "${server_pid}" >/dev/null 2>&1 || true
+  fi
+  pkill -f "python3 - ${root}" >/dev/null 2>&1 || true
+
+  log "[4/4] Deleting ${root} ..."
+  cd / || true
+  rm -rf "${root}"
+
+  log ""
+  log "SOS complete. Smart Connect has been removed from this machine."
+}
+
 # --- Dispatch -----------------------------------------------------------
-case "${1:-help}" in
+case "${1:-}" in
+  help|-h|--help) usage; exit 0 ;;
+esac
+
+require_this_os
+
+case "${1:-}" in
+  gui)            cmd_gui ;;
   setup)          cmd_setup ;;
   start|up)       cmd_start ;;
   stop|down)      cmd_stop ;;
   update)         cmd_update ;;
-  status)         cmd_status ;;
+  status)
+    if [[ "${2:-}" == "--json" ]]; then cmd_status_json; else cmd_status; fi
+    ;;
   ip)             print_ip ;;
+  check)          cmd_check ;;
+  sos)            cmd_sos ;;
   help|-h|--help) usage ;;
+  "")
+    # No command: open the web console when possible, otherwise show usage.
+    if command -v python3 &>/dev/null && [[ -f "$(gui_script_dir)/gui.html" ]]; then
+      cmd_gui
+    else
+      usage
+    fi
+    ;;
   *)
     warn "Unknown command: ${1}"
     log ""

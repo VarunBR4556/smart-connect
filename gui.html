@@ -1,0 +1,1440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Smart Connect — Console</title>
+<script>
+  (function () {
+    try {
+      var saved = localStorage.getItem('sc_theme');
+      if (saved !== 'dark' && saved !== 'light') {
+        saved = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-theme', saved);
+    } catch (e) { /* default (light) is fine */ }
+  }());
+</script>
+<style>
+  :root {
+    --bg:        #FFFCF7;
+    --panel:     #FCF7F1;
+    --panel-2:   #F6F1EB;
+    --card:      #FFFFFF;
+    --ink:       #000000;
+    --ink-2:     #2b333f;
+    --muted:     #696969;
+    --faint:     #919191;
+    --line:      #e4dccf;
+    --line-soft: #efe8dc;
+    --accent:    #ED6B00;
+    --rust:      #9d2a1e;
+    --sans: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --serif: "EB Garamond", Garamond, "Times New Roman", Times, serif;
+    --mono: "Overpass Mono", ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  }
+
+  :root[data-theme="dark"] {
+    --bg:        #14110f;
+    --panel:     #1b1714;
+    --panel-2:   #221d19;
+    --card:      #1d1916;
+    --ink:       #f6f0e7;
+    --ink-2:     #d8cfc2;
+    --muted:     #a79b8b;
+    --faint:     #776d61;
+    --line:      #362e27;
+    --line-soft: #291f1a;
+    --accent:    #ff8f3f;
+    --rust:      #ef7264;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.55;
+    border-top: 2px solid var(--accent);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  ::selection { background: rgba(237, 107, 0, .18); }
+
+  .wrap {
+    width: 100%;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0 32px;
+  }
+
+  /* ---------- header ---------- */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+  }
+
+  .header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 0;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .monogram {
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--serif);
+    font-size: 16px;
+    line-height: 1;
+    padding-bottom: 1px;
+  }
+
+  .wordmark {
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+  }
+
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    padding: 6px 12px;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--faint);
+    flex: none;
+  }
+
+  .dot.on  { background: var(--accent); }
+  .dot.off { background: transparent; border: 1px solid var(--faint); }
+
+  .theme-btn {
+    appearance: none;
+    font-family: var(--sans);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    padding: 6px 12px;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    white-space: nowrap;
+    transition: border-color .15s ease, color .15s ease;
+  }
+
+  .theme-btn:hover { border-color: var(--ink); color: var(--ink); }
+  .theme-btn .icon { font-size: 12px; line-height: 1; }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 64px 0 40px; }
+
+  .eyebrow {
+    margin: 0 0 18px;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  h1 {
+    margin: 0 0 14px;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(34px, 5.4vw, 52px);
+    line-height: 1.08;
+    letter-spacing: -.01em;
+  }
+
+  .lede {
+    margin: 0;
+    max-width: 52ch;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .hero-status {
+    margin-top: 40px;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .stat {
+    padding: 18px 28px 18px 0;
+    margin-right: 28px;
+    border-right: 1px solid var(--line-soft);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 150px;
+  }
+
+  .stat:last-child { border-right: 0; margin-right: 0; }
+
+  .stat .label {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .stat .value {
+    font-size: 14px;
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .stat .value.mono {
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
+
+  .link-btn {
+    appearance: none;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--ink);
+    padding: 0 0 1px;
+    margin: 0;
+    font-family: var(--sans);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink);
+    cursor: pointer;
+    transition: color .15s ease, border-color .15s ease;
+  }
+
+  .link-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+  .link-btn:disabled { color: var(--faint); border-color: var(--line); cursor: default; }
+
+  /* ---------- sections ---------- */
+  section { padding: 8px 0 40px; }
+
+  .section-head {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 24px 0 20px;
+  }
+
+  .section-head h2 {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .section-head::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+
+  .section-head .link-btn { flex: none; }
+
+  /* ---------- tiles ---------- */
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .tile {
+    appearance: none;
+    text-align: left;
+    background: var(--card);
+    border: 1px solid var(--line);
+    padding: 16px 15px 14px;
+    font-family: var(--sans);
+    color: var(--ink);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 128px;
+    min-width: 0;
+    transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+  }
+
+  .tile:hover:not(:disabled) {
+    border-color: var(--ink);
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px rgba(43, 51, 63, .06);
+  }
+
+  .tile:disabled { opacity: .45; cursor: default; }
+
+  .tile .idx {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .1em;
+    color: var(--faint);
+  }
+
+  .tile .t {
+    font-family: var(--serif);
+    font-size: 18px;
+    line-height: 1.15;
+    font-weight: 400;
+    overflow-wrap: anywhere;
+  }
+
+  .tile .d {
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+
+  .tile .arrow {
+    margin-top: auto;
+    font-size: 15px;
+    line-height: 1;
+    transition: transform .18s ease, color .18s ease;
+  }
+
+  .tile:hover:not(:disabled) .arrow { transform: translateX(5px); color: var(--accent); }
+
+  .tile.danger .t { color: var(--rust); }
+  .tile.danger:hover:not(:disabled) .arrow { color: var(--rust); }
+
+  /* ---------- activity log ---------- */
+  .log-panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+  }
+
+  #log {
+    margin: 0;
+    padding: 18px 20px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    font-weight: 500;
+    line-height: 1.7;
+    color: var(--ink);
+    min-height: 300px;
+    max-height: 60vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  #log .entry { display: block; }
+  #log .entry + .entry { margin-top: 10px; }
+  #log .entry.out { margin-top: 6px; }
+  #log .stamp { color: var(--muted); font-weight: 600; }
+  #log .cmd { color: #bf5200; font-weight: 700; }
+  #log .err { color: var(--rust); font-weight: 700; }
+  #log .placeholder { color: var(--muted); font-style: italic; }
+  #log .ansi-bold { font-weight: 700; }
+  #log .ansi-dim { opacity: .8; }
+  #log .ansi-italic { font-style: italic; }
+  #log .ansi-underline { text-decoration: underline; }
+
+  /* ANSI palette — light (saturated for contrast, weight added for visibility) */
+  #log .ansi-30 { color: #4b5563; }
+  #log .ansi-31 { color: #b3261e; }
+  #log .ansi-32 { color: #1f7a44; }
+  #log .ansi-33 { color: #9a6a00; }
+  #log .ansi-34 { color: #235f9e; }
+  #log .ansi-35 { color: #7b2fb0; }
+  #log .ansi-36 { color: #0f7a8a; }
+  #log .ansi-37 { color: #374151; }
+  #log .ansi-90 { color: #6b7280; }
+  #log .ansi-91 { color: #d13327; }
+  #log .ansi-92 { color: #1f8a41; }
+  #log .ansi-93 { color: #a87b00; }
+  #log .ansi-94 { color: #2f6fd6; }
+  #log .ansi-95 { color: #8f3fe0; }
+  #log .ansi-96 { color: #0b8a99; }
+  #log .ansi-97 { color: #000000; }
+
+  /* syntax-style tokens — light */
+  #log .t-sec  { color: #0b5cad; font-weight: 700; }
+  #log .t-sub  { color: #1f6e86; font-weight: 700; }
+  #log .t-str  { color: #9a1010; font-weight: 500; }
+  #log .t-num  { color: #087a4f; font-weight: 500; }
+  #log .t-flag { color: #0451a5; font-weight: 600; }
+  #log .t-path { color: #1f6e86; font-weight: 500; }
+  #log .t-ip   { color: #0e7490; font-weight: 500; }
+  #log .t-url  { color: #0a66c2; font-weight: 500; text-decoration: underline; }
+  #log .t-ok   { color: #15803d; font-weight: 700; }
+  #log .t-fail { color: #c0392b; font-weight: 700; }
+  #log .t-warn { color: #a16207; font-weight: 700; }
+  #log .t-info { color: #2563eb; font-weight: 600; }
+
+  /* cyberpunk terminal surface — dark theme */
+  :root[data-theme="dark"] .log-panel {
+    background:
+      repeating-linear-gradient(180deg, rgba(0, 240, 255, .04) 0 1px, transparent 1px 3px),
+      #06070d;
+    border-color: #14343c;
+    box-shadow: inset 0 0 46px rgba(0, 240, 255, .06), inset 0 0 18px rgba(255, 47, 185, .05);
+  }
+  :root[data-theme="dark"] .shell-row { background: #06070d; border-top-color: #14343c; }
+  :root[data-theme="dark"] #log { color: #c9f2ff; text-shadow: 0 0 6px rgba(0, 240, 255, .20); }
+  :root[data-theme="dark"] #log .stamp { color: #4f6b78; }
+  :root[data-theme="dark"] #log .cmd { color: #ff2fb9; text-shadow: 0 0 8px rgba(255, 47, 185, .55); }
+  :root[data-theme="dark"] #log .err { color: #ff003c; text-shadow: 0 0 8px rgba(255, 0, 60, .5); }
+  :root[data-theme="dark"] .shell-prompt { color: #00f0ff; text-shadow: 0 0 9px rgba(0, 240, 255, .75); }
+  :root[data-theme="dark"] .shell-row input { color: #7bffff; }
+  :root[data-theme="dark"] .shell-row input::placeholder { color: #3d6b73; }
+
+  /* neon ANSI palette */
+  :root[data-theme="dark"] #log .ansi-30 { color: #5a6478; }
+  :root[data-theme="dark"] #log .ansi-31 { color: #ff2e5b; text-shadow: 0 0 7px rgba(255, 46, 91, .5); }
+  :root[data-theme="dark"] #log .ansi-32 { color: #00ff9c; text-shadow: 0 0 7px rgba(0, 255, 156, .45); }
+  :root[data-theme="dark"] #log .ansi-33 { color: #fcee0a; text-shadow: 0 0 7px rgba(252, 238, 10, .45); }
+  :root[data-theme="dark"] #log .ansi-34 { color: #2e7dff; text-shadow: 0 0 7px rgba(46, 125, 255, .5); }
+  :root[data-theme="dark"] #log .ansi-35 { color: #ff2fb9; text-shadow: 0 0 7px rgba(255, 47, 185, .55); }
+  :root[data-theme="dark"] #log .ansi-36 { color: #00f0ff; text-shadow: 0 0 7px rgba(0, 240, 255, .5); }
+  :root[data-theme="dark"] #log .ansi-37 { color: #d6f5ff; }
+  :root[data-theme="dark"] #log .ansi-90 { color: #5a6478; }
+  :root[data-theme="dark"] #log .ansi-91 { color: #ff5c7a; text-shadow: 0 0 7px rgba(255, 92, 122, .5); }
+  :root[data-theme="dark"] #log .ansi-92 { color: #39ff14; text-shadow: 0 0 7px rgba(57, 255, 20, .5); }
+  :root[data-theme="dark"] #log .ansi-93 { color: #f9f871; text-shadow: 0 0 7px rgba(249, 248, 113, .5); }
+  :root[data-theme="dark"] #log .ansi-94 { color: #6aa8ff; text-shadow: 0 0 7px rgba(106, 168, 255, .5); }
+  :root[data-theme="dark"] #log .ansi-95 { color: #ff7ae0; text-shadow: 0 0 7px rgba(255, 122, 224, .5); }
+  :root[data-theme="dark"] #log .ansi-96 { color: #7bffff; text-shadow: 0 0 7px rgba(123, 255, 255, .5); }
+  :root[data-theme="dark"] #log .ansi-97 { color: #ffffff; }
+
+  /* neon syntax tokens */
+  :root[data-theme="dark"] #log .t-sec  { color: #fcee0a; text-shadow: 0 0 9px rgba(252, 238, 10, .6); }
+  :root[data-theme="dark"] #log .t-sub  { color: #00f0ff; text-shadow: 0 0 9px rgba(0, 240, 255, .55); }
+  :root[data-theme="dark"] #log .t-str  { color: #ff5c8a; text-shadow: 0 0 7px rgba(255, 92, 138, .45); }
+  :root[data-theme="dark"] #log .t-num  { color: #00ff9c; text-shadow: 0 0 7px rgba(0, 255, 156, .4); }
+  :root[data-theme="dark"] #log .t-flag { color: #00f0ff; }
+  :root[data-theme="dark"] #log .t-path { color: #2de2e6; }
+  :root[data-theme="dark"] #log .t-ip   { color: #b388ff; text-shadow: 0 0 7px rgba(179, 136, 255, .5); }
+  :root[data-theme="dark"] #log .t-url  { color: #ff2fb9; text-decoration: underline; }
+  :root[data-theme="dark"] #log .t-ok   { color: #39ff14; text-shadow: 0 0 9px rgba(57, 255, 20, .55); }
+  :root[data-theme="dark"] #log .t-fail { color: #ff003c; text-shadow: 0 0 9px rgba(255, 0, 60, .6); }
+  :root[data-theme="dark"] #log .t-warn { color: #fcee0a; text-shadow: 0 0 9px rgba(252, 238, 10, .6); }
+  :root[data-theme="dark"] #log .t-info { color: #2e7dff; text-shadow: 0 0 9px rgba(46, 125, 255, .5); }
+
+  /* ---------- terminal input ---------- */
+  .shell-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-top: 1px solid var(--line);
+    background: var(--card);
+    padding: 8px 14px;
+  }
+
+  .shell-prompt {
+    flex: none;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  .shell-row input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    padding: 6px 0;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .shell-row input::placeholder { color: var(--muted); }
+  .shell-row input:disabled { opacity: .5; }
+
+  /* ---------- terminal resize handle ---------- */
+  .resize-grip {
+    height: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-top: 1px solid var(--line);
+    background: var(--panel-2);
+    cursor: ns-resize;
+    touch-action: none;
+    user-select: none;
+  }
+  .resize-grip::before {
+    content: "";
+    width: 46px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--faint);
+    opacity: .55;
+    transition: opacity .15s ease, background .15s ease;
+  }
+  .resize-grip:hover::before,
+  .resize-grip:focus-visible::before { opacity: 1; background: var(--accent); }
+  .resize-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  /* ---------- footer ---------- */
+  footer {
+    margin-top: auto;
+    border-top: 1px solid var(--line);
+    padding: 26px 0 34px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+  }
+
+  footer .sep { margin: 0 10px; color: var(--line); }
+
+  .footer-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .sos-btn {
+    appearance: none;
+    cursor: pointer;
+    font-family: var(--sans);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    padding: 7px 16px;
+    border: 1px solid #e05252;
+    background: #b3261e;
+    color: #ffffff;
+    transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
+  }
+  .sos-btn:hover:not(:disabled) { background: #e03030; border-color: #ff6b6b; box-shadow: 0 0 12px rgba(255, 60, 60, .5); }
+  .sos-btn:disabled { opacity: .55; cursor: default; }
+
+  /* self-destruct overlay */
+  .sos-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(10, 8, 6, .94);
+    text-align: center;
+  }
+  .sos-overlay[hidden] { display: none; }
+  .sos-overlay-box { max-width: 440px; font-family: var(--mono); }
+  .sos-overlay-title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: .3em;
+    color: #ff2e2e;
+    text-shadow: 0 0 14px rgba(255, 46, 46, .7);
+    animation: sosPulse 1.1s ease-in-out infinite;
+  }
+  .sos-overlay-text { margin: 14px 0 0; font-size: 13px; line-height: 1.6; color: #e7d9c8; }
+  @keyframes sosPulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+
+  /* coffee-brown chrome — light theme only */
+  :root[data-theme="light"] header {
+    background: linear-gradient(180deg, #3f2b1d, #2c1e14);
+    border-bottom-color: #1f150e;
+    box-shadow: 0 1px 0 rgba(31, 21, 14, .35);
+  }
+  :root[data-theme="light"] header .wordmark { color: #f7ecdd; }
+  :root[data-theme="light"] header .monogram { color: #f7ecdd; border-color: rgba(247, 236, 221, .55); }
+  :root[data-theme="light"] header .pill,
+  :root[data-theme="light"] header .theme-btn {
+    background: rgba(255, 250, 242, .12);
+    border-color: rgba(247, 236, 221, .34);
+    color: #f2e4d2;
+  }
+  :root[data-theme="light"] header .theme-btn:hover {
+    background: rgba(255, 250, 242, .2);
+    border-color: #f7ecdd;
+    color: #ffffff;
+  }
+  :root[data-theme="light"] header .dot.off { border-color: rgba(247, 236, 221, .6); }
+
+  :root[data-theme="light"] footer {
+    background: linear-gradient(180deg, #7a573c, #634631);
+    border-top-color: #3f2b1d;
+    color: #f2e6d6;
+  }
+  :root[data-theme="light"] footer .sep { color: #b39578; }
+
+  /* dark terminal surface inside the light theme (uses the dark theme's --bg) */
+  :root[data-theme="light"] .log-panel { background: #14110f; border-color: #362e27; }
+  :root[data-theme="light"] #log { color: #e9e0d3; }
+  :root[data-theme="light"] #log .stamp { color: #9c8f7e; }
+  :root[data-theme="light"] #log .cmd { color: #ffb066; }
+  :root[data-theme="light"] #log .err { color: #ff8877; }
+  :root[data-theme="light"] #log .placeholder { color: #9c8f7e; }
+  :root[data-theme="light"] .shell-row { background: #14110f; border-top-color: #362e27; }
+  :root[data-theme="light"] .shell-prompt { color: #ffb066; }
+  :root[data-theme="light"] .shell-row input { color: #f6f0e7; }
+  :root[data-theme="light"] .shell-row input::placeholder { color: #9c8f7e; }
+  :root[data-theme="light"] .resize-grip { background: #1b1714; border-top-color: #362e27; }
+  :root[data-theme="light"] .resize-grip::before { background: #9c8f7e; }
+
+  /* readable palette on the dark terminal */
+  :root[data-theme="light"] #log .ansi-30 { color: #8b93a1; }
+  :root[data-theme="light"] #log .ansi-31 { color: #ff6b6b; }
+  :root[data-theme="light"] #log .ansi-32 { color: #6fdc8c; }
+  :root[data-theme="light"] #log .ansi-33 { color: #f0c674; }
+  :root[data-theme="light"] #log .ansi-34 { color: #6ab0ff; }
+  :root[data-theme="light"] #log .ansi-35 { color: #c792ea; }
+  :root[data-theme="light"] #log .ansi-36 { color: #4fd6d6; }
+  :root[data-theme="light"] #log .ansi-37 { color: #e6e6e6; }
+  :root[data-theme="light"] #log .ansi-90 { color: #8b93a1; }
+  :root[data-theme="light"] #log .ansi-91 { color: #ff8a8a; }
+  :root[data-theme="light"] #log .ansi-92 { color: #86e6a0; }
+  :root[data-theme="light"] #log .ansi-93 { color: #ffe08a; }
+  :root[data-theme="light"] #log .ansi-94 { color: #8ac4ff; }
+  :root[data-theme="light"] #log .ansi-95 { color: #d7a8ff; }
+  :root[data-theme="light"] #log .ansi-96 { color: #7fe6e6; }
+  :root[data-theme="light"] #log .ansi-97 { color: #ffffff; }
+  :root[data-theme="light"] #log .t-sec  { color: #7fb2ff; }
+  :root[data-theme="light"] #log .t-sub  { color: #5fc9c9; }
+  :root[data-theme="light"] #log .t-str  { color: #ff9e80; }
+  :root[data-theme="light"] #log .t-num  { color: #b5e08c; }
+  :root[data-theme="light"] #log .t-flag { color: #6ab0ff; }
+  :root[data-theme="light"] #log .t-path { color: #5fc9c9; }
+  :root[data-theme="light"] #log .t-ip   { color: #4fd6d6; }
+  :root[data-theme="light"] #log .t-url  { color: #6ab0ff; }
+  :root[data-theme="light"] #log .t-ok   { color: #6fdc8c; }
+  :root[data-theme="light"] #log .t-fail { color: #ff6b6b; }
+  :root[data-theme="light"] #log .t-warn { color: #f0c674; }
+  :root[data-theme="light"] #log .t-info { color: #8ac4ff; }
+
+  /* ---------- toasts ---------- */
+  #toasts {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 50;
+    max-width: min(340px, calc(100vw - 48px));
+  }
+
+  .toast {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--accent);
+    padding: 12px 16px;
+    font-size: 12px;
+    color: var(--ink-2);
+    box-shadow: 0 12px 28px rgba(43, 51, 63, .1);
+    animation: toast-in .22s ease;
+  }
+
+  .toast.error { border-left-color: var(--rust); }
+  .toast strong { font-weight: 500; color: var(--ink); }
+
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* ---------- busy indicator (loading bar pinned to the top bar) ---------- */
+  .busy-bar {
+    display: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    background-size: 40% 100%;
+    background-repeat: no-repeat;
+    animation: sweep 1.1s linear infinite;
+    pointer-events: none;
+  }
+
+  body.busy .busy-bar { display: block; }
+
+  @keyframes sweep {
+    from { background-position: -40% 0; }
+    to   { background-position: 140% 0; }
+  }
+
+  @media (max-width: 640px) {
+    .wrap { padding: 0 20px; }
+    .hero { padding-top: 44px; }
+    .stat { border-right: 0; margin-right: 0; padding-right: 0; min-width: 100%; }
+    .hero-status { display: block; }
+    .stat + .stat { border-top: 1px solid var(--line-soft); }
+    .header-row { flex-direction: column; align-items: flex-start; }
+    .meta { justify-content: flex-start; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap header-row">
+    <div class="brand">
+      <span class="monogram" aria-hidden="true">S</span>
+      <span class="wordmark">Smart&nbsp;Connect</span>
+    </div>
+    <div class="meta">
+      <span class="pill" id="platformBadge">Detecting…</span>
+      <span class="pill"><span class="dot" id="liveDot"></span><span id="liveLabel">Connecting</span></span>
+      <button class="theme-btn" id="themeToggle" type="button" aria-label="Toggle dark mode" aria-pressed="false">
+        <span class="icon" id="themeIcon" aria-hidden="true">☾</span><span id="themeLabel">Dark</span>
+      </button>
+    </div>
+  </div>
+  <div class="busy-bar" aria-hidden="true"></div>
+</header>
+
+<main class="wrap">
+
+  <section class="hero">
+    <p class="eyebrow">Tailscale · SSH · End-to-end encrypted</p>
+    <h1>Your laptop, in your pocket.</h1>
+    <p class="lede">Reach this machine's terminal from your phone — no public IP, no port forwarding, no cost. Everything below runs on this computer; your phone connects through your private Tailscale network.</p>
+
+    <div class="hero-status">
+      <div class="stat">
+        <span class="label">SSH server</span>
+        <span class="value" id="sshState">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">Tailscale</span>
+        <span class="value" id="tsState">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">Connect from your phone</span>
+        <span class="value mono" id="sshCommand">—</span>
+        <span><button class="link-btn" id="copyBtn" disabled>Copy</button></span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head"><h2>Controls</h2></div>
+    <div class="tiles" id="tiles">
+      <button class="tile" data-cmd="start">
+        <span class="idx">01</span>
+        <span class="t">Start</span>
+        <span class="d">Start SSH and bring Tailscale online.</span>
+        <span class="arrow" aria-hidden="true">→</span>
+      </button>
+      <button class="tile danger" data-cmd="stop">
+        <span class="idx">02</span>
+        <span class="t">Stop</span>
+        <span class="d">Stop SSH and Tailscale completely — nothing keeps running.</span>
+        <span class="arrow" aria-hidden="true">→</span>
+      </button>
+      <button class="tile" data-cmd="update">
+        <span class="idx">03</span>
+        <span class="t">Update</span>
+        <span class="d">Update SSH and Tailscale, then bring them back up.</span>
+        <span class="arrow" aria-hidden="true">→</span>
+      </button>
+      <button class="tile" data-cmd="setup">
+        <span class="idx">04</span>
+        <span class="t">Setup</span>
+        <span class="d">First time here? Install SSH and connect Tailscale.</span>
+        <span class="arrow" aria-hidden="true">→</span>
+      </button>
+      <button class="tile" data-cmd="check">
+        <span class="idx">05</span>
+        <span class="t">Check</span>
+        <span class="d">Verify this system meets every version requirement.</span>
+        <span class="arrow" aria-hidden="true">→</span>
+      </button>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Activity</h2>
+      <button class="link-btn" id="clearLog">Clear</button>
+    </div>
+    <div class="log-panel">
+      <pre id="log" aria-live="polite"><span class="placeholder">Run a control above, or type a command below.</span></pre>
+      <form class="shell-row" id="shellForm" autocomplete="off">
+        <span class="shell-prompt" aria-hidden="true">$</span>
+        <input id="shellInput" type="text" spellcheck="false" autocapitalize="off"
+               autocomplete="off" autocorrect="off"
+               placeholder="Type a command and press Enter (e.g. ls -la)">
+        <button type="submit" class="link-btn" id="shellRun">Run</button>
+      </form>
+      <div class="resize-grip" id="logResize" role="separator" aria-orientation="horizontal"
+           aria-label="Resize terminal" tabindex="0" title="Drag to resize"></div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap footer-row">
+    <span class="foot-note">Smart Connect<span class="sep">·</span>Tailscale + SSH<span class="sep">·</span>No public ports<span class="sep">·</span>MIT</span>
+    <button type="button" class="sos-btn" id="sosBtn"
+            title="Delete Smart Connect: SSH, Tailscale and all project files">SOS</button>
+  </div>
+</footer>
+
+<div id="sosOverlay" class="sos-overlay" hidden>
+  <div class="sos-overlay-box">
+    <div class="sos-overlay-title">SELF-DESTRUCT</div>
+    <p class="sos-overlay-text">Removing SSH, disconnecting Tailscale and deleting every project file.</p>
+    <p class="sos-overlay-text">This console will disconnect. Nothing will remain.</p>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ---------- session token ---------- */
+  var params = new URLSearchParams(window.location.search);
+  var token = params.get('t') || sessionStorage.getItem('sc_token') || '';
+  if (token) {
+    sessionStorage.setItem('sc_token', token);
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }
+
+  var busy = false;
+  var lastSshCommand = '';
+
+  var el = {
+    platform:  document.getElementById('platformBadge'),
+    liveDot:   document.getElementById('liveDot'),
+    liveLabel: document.getElementById('liveLabel'),
+    sshState:  document.getElementById('sshState'),
+    tsState:   document.getElementById('tsState'),
+    sshCmd:    document.getElementById('sshCommand'),
+    copyBtn:   document.getElementById('copyBtn'),
+    log:       document.getElementById('log'),
+    toasts:    document.getElementById('toasts'),
+    shellForm: document.getElementById('shellForm'),
+    shellInput:document.getElementById('shellInput'),
+    shellRun:  document.getElementById('shellRun'),
+    tiles:     Array.prototype.slice.call(document.querySelectorAll('.tile'))
+  };
+
+  var history = [];
+  var historyIndex = 0;
+
+  /* ---------- API ---------- */
+  function api(path, options) {
+    options = options || {};
+    options.headers = options.headers || {};
+    options.headers['X-Smart-Token'] = token;
+    if (options.body) { options.headers['Content-Type'] = 'application/json'; }
+    return fetch(path, options).then(function (response) {
+      return response.json().catch(function () {
+        throw new Error('The console server stopped responding.');
+      }).then(function (data) {
+        if (!response.ok) { throw new Error(data.error || ('HTTP ' + response.status)); }
+        return data;
+      });
+    });
+  }
+
+  /* ---------- status rendering ---------- */
+  function setLive(ok, note) {
+    el.liveDot.className = 'dot ' + (ok ? 'on' : 'off');
+    el.liveLabel.textContent = ok ? 'Console live' : (note || 'Console offline');
+  }
+
+  function renderStatus(s) {
+    el.platform.textContent = s.os || (s.platform === 'windows' ? 'Windows' : 'Linux');
+    el.shellInput.placeholder = s.platform === 'windows'
+      ? 'Type a command and press Enter (e.g. Get-Service sshd)'
+      : 'Type a command and press Enter (e.g. ls -la)';
+
+    if (s.ssh_installed && s.ssh_active) {
+      el.sshState.textContent = 'Running' + (s.ssh_service ? ' · ' + s.ssh_service : '');
+      el.sshState.style.color = 'var(--ink)';
+    } else if (s.ssh_installed) {
+      el.sshState.textContent = 'Stopped';
+      el.sshState.style.color = 'var(--rust)';
+    } else {
+      el.sshState.textContent = 'Not installed';
+      el.sshState.style.color = 'var(--muted)';
+    }
+
+    if (s.tailscale_installed && s.tailscale_connected) {
+      el.tsState.textContent = 'Connected';
+      el.tsState.style.color = 'var(--ink)';
+    } else if (s.tailscale_installed) {
+      el.tsState.textContent = 'Offline';
+      el.tsState.style.color = 'var(--rust)';
+    } else {
+      el.tsState.textContent = 'Not installed';
+      el.tsState.style.color = 'var(--muted)';
+    }
+
+    if (s.ip) {
+      lastSshCommand = 'ssh ' + (s.user ? s.user + '@' : '') + s.ip;
+      el.sshCmd.textContent = lastSshCommand;
+      el.copyBtn.disabled = false;
+    } else {
+      lastSshCommand = '';
+      el.sshCmd.textContent = s.tailscale_installed ? 'Run Start to connect' : 'Run Setup first';
+      el.copyBtn.disabled = true;
+    }
+  }
+
+  function refresh() {
+    if (busy) { return Promise.resolve(); }
+    return api('/api/status').then(function (status) {
+      setLive(true);
+      renderStatus(status);
+    }).catch(function (error) {
+      setLive(false, 'Console offline');
+      el.sshState.textContent = '—';
+      el.tsState.textContent = '—';
+      el.sshState.style.color = '';
+      el.tsState.style.color = '';
+      if (error.message) { /* keep quiet in UI; log once */ }
+    });
+  }
+
+  /* ---------- activity log ---------- */
+  function timestamp() {
+    var d = new Date();
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }
+
+  function beginEntry(className) {
+    var placeholder = el.log.querySelector('.placeholder');
+    if (placeholder) { placeholder.remove(); }
+
+    var entry = document.createElement('span');
+    entry.className = 'entry' + (className ? ' ' + className : '');
+    el.log.appendChild(entry);
+    return entry;
+  }
+
+  function scrollLog() { el.log.scrollTop = el.log.scrollHeight; }
+
+  function logLine(text, className) {
+    var entry = beginEntry(className);
+
+    var stamp = document.createElement('span');
+    stamp.className = 'stamp';
+    stamp.textContent = '[' + timestamp() + '] ';
+
+    var body = document.createElement('span');
+    body.textContent = text;
+
+    entry.appendChild(stamp);
+    entry.appendChild(body);
+    scrollLog();
+  }
+
+  function beginOutput() {
+    var entry = beginEntry('out');
+    scrollLog();
+    return entry;
+  }
+
+  /* ---------- terminal colour ---------- */
+  // Base 16 ANSI colours resolve to CSS classes so the palette can differ
+  // per theme; extended (256 / truecolour) codes keep an inline colour.
+  var ANSI_FG = ['#5b6470', '#d1495b', '#3a9d5d', '#b8860b', '#3b7dd8', '#a855f7', '#12a5b8', '#4b5563'];
+  var ANSI_FG_BRIGHT = ['#8b93a1', '#ef5f6f', '#4fd07a', '#e6b422', '#5aa9f0', '#c78bff', '#3fd0d0', '#9aa0aa'];
+
+  // Syntax-style tokens for plain (uncoloured) output — colours come from CSS.
+  var TOKEN_RE = new RegExp([
+    '(===+[^\\n]*)',
+    '(-{3,}[^\\n]*)',
+    '(https?:\\/\\/[^\\s"\'<>]+)',
+    '(\\b\\d{1,3}(?:\\.\\d{1,3}){3}\\b)',
+    '("(?:[^"\\\\]|\\\\.)*"|\'(?:[^\'\\\\]|\\\\.)*\')',
+    '(\\B--?[A-Za-z][\\w-]*)',
+    '((?:\\.{1,2}\\/|~\\/)[\\w.@-]+(?:\\/[\\w.@-]+)*)',
+    '(\\/(?:usr|etc|home|var|opt|bin|sbin|tmp|dev|proc|sys|root)\\/[\\w.@-]+(?:\\/[\\w.@-]+)*)',
+    '(\\b\\d+(?:\\.\\d+)*\\b)',
+    '(\\b(?:OK|PASS|SUCCESS|DONE|RUNNING|CONNECTED|INSTALLED|ACTIVE)\\b)',
+    '(\\b(?:FAIL|FAILED|ERROR|FATAL|STOPPED|INACTIVE|DISCONNECTED|UNKNOWN)\\b)',
+    '(\\b(?:WARN|WARNING)\\b)',
+    '(\\bINFO\\b)'
+  ].join('|'), 'g');
+
+  var TOKEN_CLASS = ['', 't-sec', 't-sub', 't-url', 't-ip', 't-str', 't-flag',
+                     't-path', 't-path', 't-num', 't-ok', 't-fail', 't-warn', 't-info'];
+
+  function escapeHtml(text) {
+    return text.replace(/[&<>]/g, function (ch) {
+      return ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : '&gt;';
+    });
+  }
+
+  function renderPlain(text) {
+    if (!text) { return ''; }
+    var out = '';
+    var last = 0;
+    var match;
+    TOKEN_RE.lastIndex = 0;
+    while ((match = TOKEN_RE.exec(text)) !== null) {
+      out += escapeHtml(text.slice(last, match.index));
+      var group = 1;
+      while (group < TOKEN_CLASS.length && match[group] === undefined) { group += 1; }
+      out += '<span class="' + (TOKEN_CLASS[group] || 't-num') + '">' + escapeHtml(match[0]) + '</span>';
+      last = TOKEN_RE.lastIndex;
+    }
+    out += escapeHtml(text.slice(last));
+    return out;
+  }
+
+  function color256(n) {
+    if (n < 8) { return ANSI_FG[n]; }
+    if (n < 16) { return ANSI_FG_BRIGHT[n - 8]; }
+    if (n >= 232) { var level = 8 + (n - 232) * 10; return 'rgb(' + level + ',' + level + ',' + level + ')'; }
+    n -= 16;
+    var steps = [0, 95, 135, 175, 215, 255];
+    return 'rgb(' + steps[Math.floor(n / 36)] + ',' + steps[Math.floor(n / 6) % 6] + ',' + steps[n % 6] + ')';
+  }
+
+  function applySgr(state, params) {
+    var codes = params.length ? params.split(';').map(function (p) { return p === '' ? 0 : parseInt(p, 10); }) : [0];
+    for (var i = 0; i < codes.length; i++) {
+      var c = codes[i];
+      if (isNaN(c)) { continue; }
+      if (c === 0) { state.fg = state.fgClass = null; state.bold = state.dim = state.italic = state.underline = false; }
+      else if (c === 1) { state.bold = true; }
+      else if (c === 2) { state.dim = true; }
+      else if (c === 3) { state.italic = true; }
+      else if (c === 4) { state.underline = true; }
+      else if (c === 22) { state.bold = state.dim = false; }
+      else if (c === 23) { state.italic = false; }
+      else if (c === 24) { state.underline = false; }
+      else if ((c >= 30 && c <= 37) || (c >= 90 && c <= 97)) { state.fgClass = 'ansi-' + c; state.fg = null; }
+      else if (c === 39) { state.fg = state.fgClass = null; }
+      else if (c === 38 && codes[i + 1] === 5 && i + 2 < codes.length) { state.fg = color256(codes[i + 2]); state.fgClass = null; i += 2; }
+      else if (c === 38 && codes[i + 1] === 2 && i + 4 < codes.length) {
+        state.fg = 'rgb(' + codes[i + 2] + ',' + codes[i + 3] + ',' + codes[i + 4] + ')'; state.fgClass = null; i += 4;
+      }
+    }
+  }
+
+  function wrapSpan(text, state) {
+    if (!text) { return ''; }
+    var hasAnsi = state.fg || state.fgClass || state.bold || state.dim || state.italic || state.underline;
+    if (!hasAnsi) { return renderPlain(text); }
+    var cls = [];
+    if (state.fgClass) { cls.push(state.fgClass); }
+    if (state.bold) { cls.push('ansi-bold'); }
+    if (state.dim) { cls.push('ansi-dim'); }
+    if (state.italic) { cls.push('ansi-italic'); }
+    if (state.underline) { cls.push('ansi-underline'); }
+    var attr = '';
+    if (cls.length) { attr += ' class="' + cls.join(' ') + '"'; }
+    if (state.fg) { attr += ' style="color:' + state.fg + '"'; }
+    return '<span' + attr + '>' + escapeHtml(text) + '</span>';
+  }
+
+  function ansiToHtml(raw) {
+    raw = raw.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '');
+    raw = raw.replace(/\x1b\[[0-9;?]*[A-HJKSTfhl]/g, '');
+    var state = { fg: null, fgClass: null, bold: false, dim: false, italic: false, underline: false };
+    var out = '';
+    var last = 0;
+    var re = /\x1b\[([0-9;]*)m/g;
+    var match;
+    while ((match = re.exec(raw)) !== null) {
+      out += wrapSpan(raw.slice(last, match.index), state);
+      applySgr(state, match[1]);
+      last = re.lastIndex;
+    }
+    out += wrapSpan(raw.slice(last), state);
+    return out;
+  }
+
+  function appendOutput(entry, text) {
+    if (!text) { return; }
+    entry._raw = (entry._raw || '') + text;
+    entry.innerHTML = ansiToHtml(entry._raw);
+    scrollLog();
+  }
+
+  function clearLog() {
+    el.log.textContent = '';
+    var placeholder = document.createElement('span');
+    placeholder.className = 'placeholder';
+    placeholder.textContent = 'Run a control above, or type a command below.';
+    el.log.appendChild(placeholder);
+  }
+
+  document.getElementById('clearLog').addEventListener('click', clearLog);
+
+  /* ---------- toasts ---------- */
+  function toast(title, detail, isError) {
+    var node = document.createElement('div');
+    node.className = 'toast' + (isError ? ' error' : '');
+
+    var strong = document.createElement('strong');
+    strong.textContent = title;
+    node.appendChild(strong);
+
+    if (detail) {
+      node.appendChild(document.createTextNode(' — ' + detail));
+    }
+
+    el.toasts.appendChild(node);
+    setTimeout(function () {
+      node.style.opacity = '0';
+      node.style.transition = 'opacity .3s ease';
+      setTimeout(function () { node.remove(); }, 320);
+    }, 4200);
+  }
+
+  /* ---------- commands (live streaming) ---------- */
+  var JOB_POLL_MS = 350;
+
+  // Keep the terminal input focused so the user can just type and press Enter.
+  function focusShell() {
+    if (busy) { return; }
+    setTimeout(function () {
+      try { el.shellInput.focus(); } catch (e) { /* ignore */ }
+    }, 0);
+  }
+
+  function setBusy(state) {
+    busy = state;
+    document.body.classList.toggle('busy', state);
+    el.tiles.forEach(function (tile) { tile.disabled = state; });
+    el.shellInput.disabled = state;
+    el.shellRun.disabled = state;
+    if (!state) { focusShell(); }
+  }
+
+  function execJob(payload, label) {
+    if (busy) { return; }
+    setBusy(true);
+    logLine('$ ' + label, 'cmd');
+
+    api('/api/run', { method: 'POST', body: JSON.stringify(payload) })
+      .then(function (result) { return pollJob(result.job, label); })
+      .catch(function (error) {
+        logLine('error: ' + error.message, 'err');
+        toast(label, error.message, true);
+      })
+      .then(function () {
+        setBusy(false);
+        refresh();
+      });
+  }
+
+  function pollJob(jobId, label) {
+    var entry = beginOutput();
+    var seen = 0;
+
+    function tick() {
+      return api('/api/job?id=' + encodeURIComponent(jobId)).then(function (job) {
+        var out = job.output || '';
+        if (out.length > seen) {
+          appendOutput(entry, out.slice(seen));
+          seen = out.length;
+        }
+        if (job.running) {
+          return new Promise(function (resolve) {
+            setTimeout(function () { resolve(tick()); }, JOB_POLL_MS);
+          });
+        }
+        if (!out) { appendOutput(entry, '(no output)'); }
+        var ok = job.code === 0;
+        logLine('— exit ' + job.code + (ok ? ' · done' : ' · failed'), ok ? '' : 'err');
+        toast(label, ok ? 'completed' : 'failed (exit ' + job.code + ')', !ok);
+      });
+    }
+
+    return tick();
+  }
+
+  function runCommand(cmd) { execJob({ cmd: cmd }, 'run ' + cmd); }
+
+  function runShell(command) {
+    var text = command.trim();
+    if (!text) { return; }
+    if (text === 'clear' || text === 'cls') { clearLog(); return; }
+    if (history[history.length - 1] !== text) { history.push(text); }
+    historyIndex = history.length;
+    execJob({ shell: text }, text);
+  }
+
+  el.tiles.forEach(function (tile) {
+    tile.addEventListener('click', function () {
+      runCommand(tile.getAttribute('data-cmd'));
+    });
+  });
+
+  /* ---------- terminal input ---------- */
+  el.shellForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    var value = el.shellInput.value;
+    el.shellInput.value = '';
+    runShell(value);
+  });
+
+  el.shellInput.addEventListener('keydown', function (event) {
+    if (event.key === 'ArrowUp') {
+      if (history.length && historyIndex > 0) {
+        historyIndex -= 1;
+        el.shellInput.value = history[historyIndex];
+      }
+      event.preventDefault();
+    } else if (event.key === 'ArrowDown') {
+      if (historyIndex < history.length - 1) {
+        historyIndex += 1;
+        el.shellInput.value = history[historyIndex];
+      } else {
+        historyIndex = history.length;
+        el.shellInput.value = '';
+      }
+      event.preventDefault();
+    }
+  });
+
+  /* ---------- copy ---------- */
+  el.copyBtn.addEventListener('click', function () {
+    if (!lastSshCommand) { return; }
+
+    function done() { toast('Copied', lastSshCommand); }
+    function fallback() {
+      var area = document.createElement('textarea');
+      area.value = lastSshCommand;
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      try { document.execCommand('copy'); done(); }
+      catch (e) { toast('Copy failed', 'select the address manually', true); }
+      area.remove();
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(lastSshCommand).then(done, fallback);
+    } else {
+      fallback();
+    }
+  });
+
+  /* ---------- theme ---------- */
+  var themeToggle = document.getElementById('themeToggle');
+  var themeIcon = document.getElementById('themeIcon');
+  var themeLabel = document.getElementById('themeLabel');
+
+  function currentTheme() {
+    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  }
+
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    var dark = theme === 'dark';
+    themeIcon.textContent = dark ? '☀' : '☾';
+    themeLabel.textContent = dark ? 'Light' : 'Dark';
+    themeToggle.setAttribute('aria-pressed', dark ? 'true' : 'false');
+    try { localStorage.setItem('sc_theme', theme); } catch (e) { /* ignore */ }
+  }
+
+  themeToggle.addEventListener('click', function () {
+    applyTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+  });
+
+  applyTheme(currentTheme());
+
+  /* ---------- self-destruct (SOS) ---------- */
+  var sosBtn = document.getElementById('sosBtn');
+  var sosOverlay = document.getElementById('sosOverlay');
+  if (sosBtn) {
+    sosBtn.addEventListener('click', function () {
+      var answer = window.prompt(
+        'This permanently deletes Smart Connect:\n' +
+        '  - the SSH server (stopped, package removed)\n' +
+        '  - Tailscale (logged out and uninstalled)\n' +
+        '  - every project file, including this console\n\n' +
+        'Type SOS to confirm.'
+      );
+      if (answer !== 'SOS') { return; }
+      sosBtn.disabled = true;
+      sosBtn.textContent = 'Wiping…';
+      api('/api/sos', { method: 'POST', body: JSON.stringify({ confirm: 'SOS' }) })
+        .then(function () {
+          if (sosOverlay) { sosOverlay.hidden = false; }
+        })
+        .catch(function (error) {
+          sosBtn.disabled = false;
+          sosBtn.textContent = 'SOS';
+          toast('SOS failed', error.message, true);
+        });
+    });
+  }
+
+  /* ---------- resizable terminal ---------- */
+  (function initTerminalResize() {
+    var grip = document.getElementById('logResize');
+    var log = el.log;
+    if (!grip || !log) { return; }
+    var MIN = 140;
+    var dragging = false;
+    var startY = 0;
+    var startH = 0;
+
+    function maxHeight() { return Math.round(window.innerHeight * 0.85); }
+
+    function setHeight(h) {
+      if (h < MIN) { h = MIN; }
+      if (h > maxHeight()) { h = maxHeight(); }
+      log.style.maxHeight = 'none';
+      log.style.minHeight = '0';
+      log.style.height = h + 'px';
+      return h;
+    }
+
+    function persist() {
+      try { localStorage.setItem('sc_log_h', String(parseInt(log.style.height, 10))); } catch (e) { /* ignore */ }
+    }
+
+    try {
+      var saved = parseInt(localStorage.getItem('sc_log_h'), 10);
+      if (saved >= MIN) { setHeight(saved); }
+    } catch (e) { /* ignore */ }
+
+    function onMove(e) {
+      if (!dragging) { return; }
+      var y = e.touches ? e.touches[0].clientY : e.clientY;
+      setHeight(startH + (y - startY));
+      if (e.cancelable) { e.preventDefault(); }
+    }
+
+    function onUp() {
+      if (!dragging) { return; }
+      dragging = false;
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+      persist();
+    }
+
+    function onDown(e) {
+      dragging = true;
+      startY = e.touches ? e.touches[0].clientY : e.clientY;
+      startH = log.getBoundingClientRect().height;
+      log.style.maxHeight = 'none';
+      log.style.minHeight = '0';
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'ns-resize';
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      window.addEventListener('touchmove', onMove, { passive: false });
+      window.addEventListener('touchend', onUp);
+      if (e.cancelable) { e.preventDefault(); }
+    }
+
+    grip.addEventListener('mousedown', onDown);
+    grip.addEventListener('touchstart', onDown, { passive: false });
+
+    grip.addEventListener('keydown', function (e) {
+      var h = log.getBoundingClientRect().height;
+      if (e.key === 'ArrowUp') { setHeight(h - 24); persist(); e.preventDefault(); }
+      else if (e.key === 'ArrowDown') { setHeight(h + 24); persist(); e.preventDefault(); }
+      else if (e.key === 'Enter' || e.key === 'Home') {
+        log.style.height = '';
+        log.style.maxHeight = '';
+        log.style.minHeight = '';
+        try { localStorage.removeItem('sc_log_h'); } catch (err) { /* ignore */ }
+        e.preventDefault();
+      }
+    });
+
+    grip.addEventListener('dblclick', function () {
+      log.style.height = '';
+      log.style.maxHeight = '';
+      log.style.minHeight = '';
+      try { localStorage.removeItem('sc_log_h'); } catch (err) { /* ignore */ }
+    });
+  }());
+
+  /* ---------- boot ---------- */
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) { refresh(); focusShell(); }
+  });
+
+  refresh();
+  setInterval(refresh, 4000);
+  focusShell();
+}());
+</script>
+</body>
+</html>
