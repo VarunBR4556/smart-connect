@@ -577,8 +577,10 @@ import itertools
 import json
 import os
 import pty
+import pwd
 import secrets
 import select
+import shutil
 import signal
 import struct
 import subprocess
@@ -973,6 +975,90 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(200, {'job': job_id})
 
 
+def browser_exe():
+    """Path to Brave if it is installed, otherwise None."""
+    for name in ('brave-browser', 'brave-browser-stable', 'brave',
+                 'brave-browser-beta', 'brave-bin'):
+        path = shutil.which(name)
+        if path:
+            return path
+
+    candidates = [
+        '/snap/bin/brave',
+        '/usr/bin/brave-browser',
+        '/usr/bin/brave',
+        '/opt/brave.com/brave/brave-browser',
+        '/var/lib/flatpak/exports/bin/com.brave.Browser',
+    ]
+    user = login_user()
+    if user:
+        try:
+            home = pwd.getpwnam(user).pw_dir
+            candidates.append(os.path.join(
+                home, '.local/share/flatpak/exports/bin/com.brave.Browser'))
+        except KeyError:
+            pass
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def open_browser(url):
+    """Open url in Brave, falling back to the default browser.
+
+    The console runs under sudo, so when we are root we drop back to the
+    login user with a reconstructed graphical session before launching the
+    browser - Chromium-based browsers refuse to run as root.
+    """
+    exe = browser_exe()
+    if not exe:
+        webbrowser.open(url)
+        return
+
+    argv = [exe, url]
+    kwargs = {'stdin': subprocess.DEVNULL, 'stdout': subprocess.DEVNULL,
+              'stderr': subprocess.DEVNULL, 'start_new_session': True}
+    env = os.environ.copy()
+    user = login_user()
+
+    if os.geteuid() == 0 and user and user != 'root':
+        try:
+            info = pwd.getpwnam(user)
+        except KeyError:
+            info = None
+        if info is not None:
+            runtime = '/run/user/%d' % info.pw_uid
+            env['HOME'] = info.pw_dir
+            env['USER'] = user
+            env['LOGNAME'] = user
+            if os.path.isdir(runtime):
+                env.setdefault('XDG_RUNTIME_DIR', runtime)
+            bus = os.path.join(env.get('XDG_RUNTIME_DIR', runtime), 'bus')
+            if os.path.exists(bus):
+                env.setdefault('DBUS_SESSION_BUS_ADDRESS', 'unix:path=%s' % bus)
+            if not env.get('WAYLAND_DISPLAY'):
+                for sock in ('wayland-0', 'wayland-1'):
+                    if os.path.exists(os.path.join(runtime, sock)):
+                        env['WAYLAND_DISPLAY'] = sock
+                        break
+            if not env.get('DISPLAY') and os.path.exists('/tmp/.X11-unix/X0'):
+                env['DISPLAY'] = ':0'
+
+            def demote(_info=info):
+                os.setgroups(os.getgrouplist(_info.pw_name, _info.pw_gid))
+                os.setgid(_info.pw_gid)
+                os.setuid(_info.pw_uid)
+
+            kwargs['env'] = env
+            kwargs['preexec_fn'] = demote
+
+    try:
+        subprocess.Popen(argv, **kwargs)
+    except OSError:
+        webbrowser.open(url)
+
+
 def main():
     server = ThreadingServer(('127.0.0.1', 0), Handler)
     port = server.server_address[1]
@@ -984,7 +1070,7 @@ def main():
     print('', flush=True)
     print('Leave this terminal open; press Ctrl+C to stop.', flush=True)
 
-    timer = threading.Timer(0.4, lambda: webbrowser.open(url))
+    timer = threading.Timer(0.4, lambda: open_browser(url))
     timer.daemon = True
     timer.start()
 
