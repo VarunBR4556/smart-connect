@@ -109,7 +109,3 @@ Only four files really matter:
 - `README.md` — this file.
 
 Run `./run gui` — or just `./run` — to open the console.
-
-## License
-
-MIT
